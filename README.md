@@ -15,25 +15,29 @@ It shows the concept of a "connection pool" - which is essentially a thread-safe
 
 It has a feature that allows you to perform an operation on all the connections that are still active:
 
-    _pool.for_each_active([] (auto const& conn) {
-        send_message(conn, hello_world_packet);
-    });
+```cpp
+_pool.for_each_active([] (auto const& conn) {
+    send_message(conn, hello_world_packet);
+});
+```
 
 Where `for_each_active` is implemented in the pool like:
 
-    template <typename F>
-    void for_each_active(F action) {
-        auto locked = [=] {
-            using namespace std;
-            lock_guard<Mutex> lk(_mx);
-            vector<Ptr> locked(_pool.size());
-            transform(_pool.begin(), _pool.end(), locked.begin(), mem_fn(&WeakPtr::lock));
-            return locked;
-        }();
+```cpp
+template <typename F>
+void for_each_active(F action) {
+    auto locked = [=] {
+        using namespace std;
+        lock_guard<Mutex> lk(_mx);
+        vector<Ptr> locked(_pool.size());
+        transform(_pool.begin(), _pool.end(), locked.begin(), mem_fn(&WeakPtr::lock));
+        return locked;
+    }();
 
-        for (auto const& p : locked)
-            if (p) action(p);
-    }
+    for (auto const& p : locked)
+        if (p) action(p);
+}
+```
 
 > The thread-safety is opt-out (you can use a `null_mutex` to omit the synchronizations)
 
