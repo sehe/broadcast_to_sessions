@@ -2,6 +2,7 @@
 #include <memory>
 #include <list>
 #include <iostream>
+#include <boost/signals2.hpp>
 
 namespace ba = boost::asio;
 using ba::ip::tcp;
@@ -67,6 +68,8 @@ struct connection : std::enable_shared_from_this<connection> {
     ba::streambuf          _rx;
     std::list<std::string> _tx;
     tcp::socket            _s;
+
+    boost::signals2::scoped_connection _subscription;
 };
 
 struct server {
@@ -85,38 +88,19 @@ struct server {
     }
 
     size_t broadcast(std::string const& msg) {
-        return for_each_active([msg](connection& c) { c.send(msg, true); });
+        _broadcast_event(msg);
+        return _broadcast_event.num_slots();
     }
 
   private:
-    using connptr = std::shared_ptr<connection>;
-    using weakptr = std::weak_ptr<connection>;
+    boost::signals2::signal<void(std::string const& msg)> _broadcast_event;
 
-    std::mutex _mx;
-    std::vector<weakptr> _registered;
+    size_t reg_connection(connection& c) {
+        c._subscription = _broadcast_event.connect(
+                [&c](std::string msg){ c.send(msg, true); }
+            );
 
-    size_t reg_connection(weakptr wp) {
-        std::lock_guard<std::mutex> lk(_mx);
-        _registered.push_back(wp);
-        return _registered.size();
-    }
-
-    template <typename F>
-    size_t for_each_active(F f) {
-        std::vector<connptr> active;
-        {
-            std::lock_guard<std::mutex> lk(_mx);
-            for (auto& w : _registered)
-                if (auto c = w.lock())
-                    active.push_back(c);
-        }
-
-        for (auto& c : active) {
-            std::cout << "(running action for " << c->_s.remote_endpoint() << ")" << std::endl;
-            f(*c);
-        }
-
-        return active.size();
+        return _broadcast_event.num_slots();
     }
 
     void accept_loop() {
@@ -126,7 +110,7 @@ struct server {
              std::cout << "Accept from " << ep << " (" << ec.message() << ")" << std::endl;
 
              if (!ec) {
-                 auto n = reg_connection(session);
+                 auto n = reg_connection(*session);
 
                  session->start();
                  accept_loop();
@@ -153,7 +137,7 @@ int main(int argc, char** argv) {
     std::this_thread::sleep_for(1s);
 
     auto n = s.broadcast("random global event broadcast\n");
-    std::cout << "Global event broadcast reached " << n << " active connections\n";
+    std::cout << "Global event broadcast reached " << n << " active subscribers\n";
 
     std::this_thread::sleep_for(2s);
     s.stop(); // active connections will continue
