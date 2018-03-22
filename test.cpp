@@ -16,8 +16,10 @@ struct connection : std::enable_shared_from_this<connection> {
 
     void start() { read_loop(); }
     void send(std::string msg, bool at_front = false) {
-        if (enqueue(std::move(msg), at_front))
-            write_loop();
+        post(_s.get_io_service(), [=] { // _s.get_executor() for newest Asio
+            if (enqueue(std::move(msg), at_front))
+                write_loop();
+        });
     }
 
   private:
@@ -28,10 +30,8 @@ struct connection : std::enable_shared_from_this<connection> {
         }
     }
 
-    // non-racy FIFO transmit queue helpers
     bool enqueue(std::string msg, bool at_front)
     { // returns true if need to start write loop
-        std::lock_guard<std::mutex> lk(_mx);
         at_front &= !_tx.empty(); // no difference
         if (at_front)
             _tx.insert(std::next(begin(_tx)), std::move(msg));
@@ -42,7 +42,6 @@ struct connection : std::enable_shared_from_this<connection> {
     }
     bool dequeue()
     { // returns true if more messages pending after dequeue
-        std::lock_guard<std::mutex> lk(_mx);
         assert(!_tx.empty());
         _tx.pop_front();
         return !_tx.empty();
@@ -65,7 +64,6 @@ struct connection : std::enable_shared_from_this<connection> {
     }
 
     friend struct server;
-    std::mutex             _mx;
     ba::streambuf          _rx;
     std::list<std::string> _tx;
     tcp::socket            _s;
