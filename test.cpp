@@ -7,6 +7,9 @@ namespace ba = boost::asio;
 using ba::ip::tcp;
 using boost::system::error_code;
 using namespace std::chrono_literals;
+using namespace std::string_literals;
+
+static bool s_verbose = false;
 
 struct connection : std::enable_shared_from_this<connection> {
     connection(ba::io_context& ioc) : _s(ioc) {}
@@ -40,14 +43,14 @@ struct connection : std::enable_shared_from_this<connection> {
 
     void write_loop() {
         ba::async_write(_s, ba::buffer(_tx.front()), [this,self=shared_from_this()](error_code ec, size_t n) {
-                std::cout << "Tx: " << n << " bytes (" << ec.message() << ")" << std::endl;
+                if (s_verbose) std::cout << "Tx: " << n << " bytes (" << ec.message() << ")" << std::endl;
                 if (!ec && dequeue()) write_loop();
             });
     }
 
     void read_loop() {
         ba::async_read_until(_s, _rx, "\n", [this,self=shared_from_this()](error_code ec, size_t n) {
-                std::cout << "Rx: " << n << " bytes (" << ec.message() << ")" << std::endl;
+                if (s_verbose) std::cout << "Rx: " << n << " bytes (" << ec.message() << ")" << std::endl;
                 do_echo();
                 if (!ec)
                     read_loop();
@@ -64,6 +67,7 @@ struct connection : std::enable_shared_from_this<connection> {
 struct server {
     server(ba::io_context& ioc) : _ioc(ioc) {
         _acc.bind({{}, 6767});
+        _acc.set_option(tcp::acceptor::reuse_address());
         _acc.listen();
         accept_loop();
     }
@@ -92,7 +96,9 @@ struct server {
     tcp::acceptor _acc{_ioc, tcp::v4()};
 };
 
-int main() {
+int main(int argc, char** argv) {
+    s_verbose = argc>1 && argv[1] == "-v"s;
+
     ba::io_context ioc;
 
     server s(ioc);
