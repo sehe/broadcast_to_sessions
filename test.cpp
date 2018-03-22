@@ -84,6 +84,10 @@ struct server {
             });
     }
 
+    size_t broadcast(std::string const& msg) {
+        return for_each_active([msg](connection& c) { c.send(msg, true); });
+    }
+
   private:
     using connptr = std::shared_ptr<connection>;
     using weakptr = std::weak_ptr<connection>;
@@ -98,21 +102,21 @@ struct server {
     }
 
     template <typename F>
-    void for_each_active(F f) {
+    size_t for_each_active(F f) {
         std::vector<connptr> active;
         {
             std::lock_guard<std::mutex> lk(_mx);
             for (auto& w : _registered)
                 if (auto c = w.lock())
                     active.push_back(c);
-                else
-                    std::cout << "(one connection has been dropped)" << std::endl;
         }
 
         for (auto& c : active) {
-            std::cout << "(running against " << c->_s.remote_endpoint() << ")" << std::endl;
+            std::cout << "(running action for " << c->_s.remote_endpoint() << ")" << std::endl;
             f(*c);
         }
+
+        return active.size();
     }
 
     void accept_loop() {
@@ -127,7 +131,7 @@ struct server {
                  session->start();
                  accept_loop();
 
-                 for_each_active([n](connection& c) { c.send("player #" + std::to_string(n) + " has entered the game\n", true); });
+                 broadcast("player #" + std::to_string(n) + " has entered the game\n");
              }
 
         });
@@ -146,7 +150,12 @@ int main(int argc, char** argv) {
 
     std::thread th([&ioc] { ioc.run(); }); // todo exception handling
 
-    std::this_thread::sleep_for(3s);
+    std::this_thread::sleep_for(1s);
+
+    auto n = s.broadcast("random global event broadcast\n");
+    std::cout << "Global event broadcast reached " << n << " active connections\n";
+
+    std::this_thread::sleep_for(2s);
     s.stop(); // active connections will continue
 
     th.join();
