@@ -85,15 +85,51 @@ struct server {
     }
 
   private:
+    using connptr = std::shared_ptr<connection>;
+    using weakptr = std::weak_ptr<connection>;
+
+    std::mutex _mx;
+    std::vector<weakptr> _registered;
+
+    size_t reg_connection(weakptr wp) {
+        std::lock_guard<std::mutex> lk(_mx);
+        _registered.push_back(wp);
+        return _registered.size();
+    }
+
+    template <typename F>
+    void for_each_active(F f) {
+        std::vector<connptr> active;
+        {
+            std::lock_guard<std::mutex> lk(_mx);
+            for (auto& w : _registered)
+                if (auto c = w.lock())
+                    active.push_back(c);
+                else
+                    std::cout << "(one connection has been dropped)" << std::endl;
+        }
+
+        for (auto& c : active) {
+            std::cout << "(running against " << c->_s.remote_endpoint() << ")" << std::endl;
+            f(*c);
+        }
+    }
+
     void accept_loop() {
         auto session = std::make_shared<connection>(_acc.get_io_context());
         _acc.async_accept(session->_s, [this,session](error_code ec) {
              auto ep = ec? tcp::endpoint{} : session->_s.remote_endpoint();
              std::cout << "Accept from " << ep << " (" << ec.message() << ")" << std::endl;
 
-             session->start();
-             if (!ec)
+             if (!ec) {
+                 auto n = reg_connection(session);
+
+                 session->start();
                  accept_loop();
+
+                 for_each_active([n](connection& c) { c.send("player #" + std::to_string(n) + " has entered the game\n", true); });
+             }
+
         });
     }
 
