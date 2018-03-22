@@ -15,8 +15,8 @@ struct connection : std::enable_shared_from_this<connection> {
     connection(ba::io_context& ioc) : _s(ioc) {}
 
     void start() { read_loop(); }
-    void send(std::string msg) {
-        if (enqueue(std::move(msg)))
+    void send(std::string msg, bool at_front = false) {
+        if (enqueue(std::move(msg), at_front))
             write_loop();
     }
 
@@ -29,12 +29,19 @@ struct connection : std::enable_shared_from_this<connection> {
     }
 
     // non-racy FIFO transmit queue helpers
-    bool enqueue(std::string msg) { // returns true if need to start write loop
+    bool enqueue(std::string msg, bool at_front)
+    { // returns true if need to start write loop
         std::lock_guard<std::mutex> lk(_mx);
-        _tx.push_back(std::move(msg));
+        at_front &= !_tx.empty(); // no difference
+        if (at_front)
+            _tx.insert(std::next(begin(_tx)), std::move(msg));
+        else
+            _tx.push_back(std::move(msg));
+
         return (_tx.size() == 1);
     }
-    bool dequeue() { // returns true if more messages pending after dequeue
+    bool dequeue()
+    { // returns true if more messages pending after dequeue
         std::lock_guard<std::mutex> lk(_mx);
         assert(!_tx.empty());
         _tx.pop_front();
